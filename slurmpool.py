@@ -15,7 +15,7 @@ SLURM_TEMPLATE = jinja2.Template("""#!/bin/bash
 {% endfor %}
 
 export PYTHONPATH="{{ pythonpath }}"
-cd "{{ jobdir }}"
+cd "{{ jobdir }}/$SLURM_ARRAY_TASK_ID"
 {{ interpreter }} run.py "{{ rundir }}"
 """)
 
@@ -71,6 +71,9 @@ def get_job_states(jobs):
         state[jid] = st
     return [state.get(jid, "NA") for jid in jobs]
 
+def get_job_state(job_id):
+    return get_job_states([job_id])[0]
+
 def try_cancel(job_id):
     try:
         sh.scancel(job_id)
@@ -100,74 +103,66 @@ class SlurmPool(object):
         prefix = os.path.join(self.workdir, "tmp")
         olddir = os.getcwd()
 
+        job_id = None
+        jobdir = None
         try:
-            for args in itertools.izip(*iterables):
-                jobdir = tempfile.mkdtemp(prefix=prefix)
-                os.chdir(jobdir)
-                slurm_script = SLURM_TEMPLATE.render(
-                        slurmconfig=self.config,
-                        rundir=olddir,
-                        jobdir=jobdir,
-                        pythonpath=":".join(pythonpath),
-                        interpreter=interpreter)
+            jobdir = tempfile.mkdtemp(prefix=prefix)
+            os.chdir(jobdir)
+            jobcount = 0
+            for i, args in enumerate(itertools.izip(*iterables), 1):
+                subdir = os.path.join(jobdir, str(i))
+                os.makedirs(subdir)
                 run_script = RUN_TEMPLATE.format()
-                with open(os.path.join(jobdir, "args.marshal"), "w") as argsfile:
+                with open(os.path.join(subdir, "args.marshal"), "w") as argsfile:
                     marshal.dump(args, argsfile)
-                with open(os.path.join(jobdir, "f.marshal"), "w") as ffile:
+                with open(os.path.join(subdir, "f.marshal"), "w") as ffile:
                     marshal.dump(f, ffile)
-                with open(os.path.join(jobdir, "run.py"), "w") as runfile:
+                with open(os.path.join(subdir, "run.py"), "w") as runfile:
                     runfile.write(run_script)
-
-                job_id = sh.sbatch("--parsable", _in=slurm_script).stdout.strip()
                 jobs.append((job_id, jobdir))
 
-            job_ids, job_dirs = zip(*jobs)
+            jobcount = i
 
-            remaining_jobs = list(job_ids)
-            error = None
-            while error is None and len(remaining_jobs) > 0:
-                states = get_job_states(remaining_jobs)
-                simple_states = [STATE_MAP.get(st, "error") for st in states] 
-                remaining_jobs2 = []
-                for jid, st in zip(remaining_jobs, simple_states):
-                    if st == "error":
-                        error = jid
-                        break
-                    if st == "ok":
-                        remaining_jobs2.append(jid)
-                remaining_jobs = remaining_jobs2
+            slurmconfig = self.config.copy()
+            slurmconfig["array"] = "1-{}".format(jobcount)
+            slurm_script = SLURM_TEMPLATE.render(
+                    slurmconfig=slurmconfig,
+                    rundir=olddir,
+                    jobdir=jobdir,
+                    pythonpath=":".join(pythonpath),
+                    interpreter=interpreter)
+            job_id = sh.sbatch("--parsable", _in=slurm_script).stdout.strip()
+
+            state = STATE_MAP.get(get_job_state(job_id), "error")
+            while state == "ok":
+                state = STATE_MAP.get(get_job_state(job_id), "error")
                 time.sleep(1)
-            if error is not None:
-                jobdir = dict(jobs)[error]
-                errfn = os.path.join(jobdir, "error.marshal")
-                if os.path.exists(errfn):
-                    with open(errfn) as errfile:
-                        err = marshal.load(errfile)
-                    raise err
-                raise RuntimeError("error in job {}".format(error))
 
             res = []
-            for jobdir in job_dirs:
-                with open(os.path.join(jobdir, "res.marshal")) as resfile:
+            for i in range(1, jobcount+1):
+                subdir = os.path.join(jobdir, str(i))
+                resfn = os.path.join(subdir, "res.marshal")
+                errfn = os.path.join(subdir, "error.marshal")
+                if os.path.exists(errfn):
+                    with open(errfn) as errfile:
+                        raise marshal.load(errfile)
+                with open(resfn) as resfile:
                     res.append(marshal.load(resfile))
+            if state == "error":
+                raise RuntimeError("an error occured")
         finally:
             os.chdir(olddir)
-            if len(jobs) > 0:
-                job_ids, job_dirs = zip(*jobs)
-                states = get_job_states(job_ids)
-                simple_states = [STATE_MAP.get(st, "error") for st in states] 
-                for jid, state in zip(job_ids, simple_states):
-                    if state != "done":
-                        try_cancel(jid)
-                for jobdir in job_dirs:
-                    shutil.rmtree(jobdir)
+            if job_id is not None:
+                try_cancel(job_id)
+            if jobdir is not None:
+                shutil.rmtree(jobdir)
         return res
 
 def f(a):
     raise ValueError("bad balue: {}".format(a))
 
 def g(a):
-    if a == 30:
+    if a == 300:
         raise ValueError("value: {}".format(30))
     return 2*a
 
