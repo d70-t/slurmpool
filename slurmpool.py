@@ -89,6 +89,24 @@ class SlurmPool(object):
         else:
             self.config = config
     def map(self, f, *iterables):
+        inputs = zip(*iterables)
+        retries = 3
+        res = self._map(f, inputs, retries)
+        while retries > 0:
+            retries -= 1
+            retry_tasks = [
+                (i, inp)
+                for i, ((c, r), inp) in enumerate(zip(res, inputs))
+                if c == "error"]
+            if len(retry_tasks) == 0:
+                break
+            idx, inputs2 = zip(*retry_tasks)
+            res2 = self._map(f, inputs2, retries)
+            for i, r in zip(idx, res2):
+                res[i] = r
+        return [r if c == "ok" else None for c, r in res]
+
+    def _map(self, f, inputs, retries):
         jobs = []
         sourcemodule = inspect.getmodule(f).__name__
         sourcefile = os.path.abspath(inspect.getfile(f))
@@ -108,8 +126,7 @@ class SlurmPool(object):
         try:
             jobdir = tempfile.mkdtemp(prefix=prefix)
             os.chdir(jobdir)
-            jobcount = 0
-            for i, args in enumerate(itertools.izip(*iterables), 1):
+            for i, args in enumerate(inputs, 1):
                 subdir = os.path.join(jobdir, str(i))
                 os.makedirs(subdir)
                 run_script = RUN_TEMPLATE.format()
@@ -121,7 +138,7 @@ class SlurmPool(object):
                     runfile.write(run_script)
                 jobs.append((job_id, jobdir))
 
-            jobcount = i
+            jobcount = len(inputs)
 
             slurmconfig = self.config.copy()
             slurmconfig["array"] = "1-{}".format(jobcount)
@@ -146,8 +163,11 @@ class SlurmPool(object):
                 if os.path.exists(errfn):
                     with open(errfn) as errfile:
                         raise marshal.load(errfile)
-                with open(resfn) as resfile:
-                    res.append(marshal.load(resfile))
+                if os.path.exists(resfn):
+                    with open(resfn) as resfile:
+                        res.append(("ok", marshal.load(resfile)))
+                else:
+                    res.append(("error", None))
             if state == "error":
                 raise RuntimeError("an error occured")
         finally:
