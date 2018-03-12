@@ -15,13 +15,16 @@ SLURM_TEMPLATE = jinja2.Template("""#!/bin/bash
 {% endfor %}
 
 export PYTHONPATH="{{ pythonpath }}"
-cd "{{ runpath }}"
-{{ interpreter }} run.py
+cd "{{ jobdir }}"
+{{ interpreter }} run.py "{{ rundir }}"
 """)
 
 RUN_TEMPLATE = """
+import os
+import sys
 import cloudpickle as marshal
 
+olddir = os.getcwd()
 try:
     with open("args.marshal") as argsfile:
         args = marshal.load(argsfile)
@@ -29,14 +32,17 @@ try:
     with open("f.marshal") as ffile:
         f = marshal.load(ffile)
 
+    os.chdir(sys.argv[1])
     res = f(*args)
+    os.chdir(olddir)
 
     with open("res.marshal", "w") as resfile:
         marshal.dump(res, resfile)
 except Exception as e:
+    os.chdir(olddir)
     with open("error.marshal", "w") as errfile:
         marshal.dump(e, errfile)
-    exit(-1)
+    raise
 """
 
 STATE_MAP = {
@@ -100,7 +106,8 @@ class SlurmPool(object):
                 os.chdir(jobdir)
                 slurm_script = SLURM_TEMPLATE.render(
                         slurmconfig=self.config,
-                        runpath=jobdir,
+                        rundir=olddir,
+                        jobdir=jobdir,
                         pythonpath=":".join(pythonpath),
                         interpreter=interpreter)
                 run_script = RUN_TEMPLATE.format()
