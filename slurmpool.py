@@ -15,8 +15,8 @@ SLURM_TEMPLATE = jinja2.Template("""#!/bin/bash
 {% endfor %}
 
 export PYTHONPATH="{{ pythonpath }}"
-cd "{{ jobdir }}/$SLURM_ARRAY_TASK_ID"
-{{ interpreter }} run.py "{{ rundir }}"
+cd "{{ jobdir }}"
+{{ interpreter }} run.py "$SLURM_ARRAY_TASK_ID" "{{ rundir }}"
 """)
 
 RUN_TEMPLATE = """
@@ -25,21 +25,23 @@ import sys
 import cloudpickle as marshal
 
 olddir = os.getcwd()
-try:
-    with open("args.marshal") as argsfile:
-        args = marshal.load(argsfile)
+controldir = os.path.join(olddir, sys.argv[1])
 
+try:
     with open("f.marshal") as ffile:
         f = marshal.load(ffile)
 
-    os.chdir(sys.argv[1])
-    res = f(*args)
-    os.chdir(olddir)
+    os.chdir(controldir)
+    with open("args.marshal") as argsfile:
+        args = marshal.load(argsfile)
 
+    os.chdir(sys.argv[2])
+    res = f(*args)
+    os.chdir(controldir)
     with open("res.marshal", "w") as resfile:
         marshal.dump(res, resfile)
 except Exception as e:
-    os.chdir(olddir)
+    os.chdir(controldir)
     with open("error.marshal", "w") as errfile:
         marshal.dump(e, errfile)
     raise
@@ -140,16 +142,17 @@ class SlurmPool(object):
         try:
             jobdir = tempfile.mkdtemp(prefix=prefix)
             os.chdir(jobdir)
+            run_script = RUN_TEMPLATE.format()
+            with open(os.path.join(jobdir, "f.marshal"), "w") as ffile:
+                marshal.dump(f, ffile)
+            with open(os.path.join(jobdir, "run.py"), "w") as runfile:
+                runfile.write(run_script)
+
             for i, args in enumerate(inputs, 1):
                 subdir = os.path.join(jobdir, str(i))
                 os.makedirs(subdir)
-                run_script = RUN_TEMPLATE.format()
                 with open(os.path.join(subdir, "args.marshal"), "w") as argsfile:
                     marshal.dump(args, argsfile)
-                with open(os.path.join(subdir, "f.marshal"), "w") as ffile:
-                    marshal.dump(f, ffile)
-                with open(os.path.join(subdir, "run.py"), "w") as runfile:
-                    runfile.write(run_script)
 
             jobcount = len(inputs)
 
