@@ -122,7 +122,6 @@ class SlurmPool(object):
         return [r if c == "ok" else None for c, r in res]
 
     def _map(self, f, inputs, retries):
-        jobs = []
         sourcemodule = inspect.getmodule(f).__name__
         sourcefile = os.path.abspath(inspect.getfile(f))
         sourcefolder = os.path.dirname(sourcefile)
@@ -151,7 +150,6 @@ class SlurmPool(object):
                     marshal.dump(f, ffile)
                 with open(os.path.join(subdir, "run.py"), "w") as runfile:
                     runfile.write(run_script)
-                jobs.append((job_id, jobdir))
 
             jobcount = len(inputs)
 
