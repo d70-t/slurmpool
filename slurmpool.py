@@ -54,7 +54,7 @@ STATE_MAP = {
     "CD": "done",
     "F": "error",
     "TO": "error",
-    "NF": "error",
+    "NF": "nodefail",
     "RV": "error",
     "SE": "error",
     "NA": "error",
@@ -73,6 +73,21 @@ def get_job_states(jobs):
 
 def get_job_state(job_id):
     return get_job_states([job_id])[0]
+
+def get_job_array_state(job_array_id):
+    states = set()
+    for line in sh.squeue("-h", format="%F %t", jobs=job_array_id, states="all").stdout.split("\n"):
+        parts = line.strip().split()
+        if len(parts) != 2:
+            continue
+        jid, st = parts
+        if jid != job_array_id:
+            continue
+        states.add(st)
+    return states
+
+def get_simplified_job_array_state(job_array_id):
+    return set(STATE_MAP.get(st, "error") for st in get_job_array_state(job_array_id))
 
 def try_cancel(job_id):
     try:
@@ -150,9 +165,9 @@ class SlurmPool(object):
                     interpreter=interpreter)
             job_id = sh.sbatch("--parsable", _in=slurm_script).stdout.strip()
 
-            state = STATE_MAP.get(get_job_state(job_id), "error")
-            while state == "ok":
-                state = STATE_MAP.get(get_job_state(job_id), "error")
+            state = get_simplified_job_array_state(job_id)
+            while not "error" in state and "ok" in state:
+                state = get_simplified_job_array_state(job_id)
                 time.sleep(1)
 
             res = []
