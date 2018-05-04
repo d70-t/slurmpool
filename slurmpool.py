@@ -45,7 +45,12 @@ try:
         args = marshal.load(argsfile)
 
     os.chdir(sys.argv[2])
-    res = f(*args)
+    if len(args) == 1:
+        res = [f(*(args[0]))]
+    else:
+        from multiprocessing.pool import ThreadPool
+        pool = ThreadPool(len(args))
+        res = pool.map(lambda x: f(*x), args)
     os.chdir(controldir)
     with open("res.marshal", "w") as resfile:
         marshal.dump(res, resfile)
@@ -106,14 +111,20 @@ def try_cancel(job_id):
     except:
         pass
 
+def chunks(l, n):
+    n = max(1, n)
+    return (l[i:i+n] for i in xrange(0, len(l), n))
 
 class SlurmPool(object):
-    def __init__(self, workdir, config=None):
+    def __init__(self, workdir, threads=2, config=None):
         self.workdir = workdir
         if config is None:
             self.config = {}
         else:
             self.config = config
+        self.config["cpus-per-task"] = threads
+        self.threads = threads
+
     def map(self, f, *iterables):
         inputs = zip(*iterables)
         retries = 3
@@ -148,6 +159,9 @@ class SlurmPool(object):
 
         job_id = None
         jobdir = None
+
+        inputs = list(chunks(inputs, self.threads))
+
         try:
             jobdir = tempfile.mkdtemp(prefix=prefix)
             os.chdir(jobdir)
@@ -196,16 +210,14 @@ class SlurmPool(object):
                     with open(resfn) as resfile:
                         res.append(("ok", marshal.load(resfile)))
                 else:
-                    res.append(("error", None))
-            if state == "error":
-                raise RuntimeError("an error occured")
+                    res.append(("error", [None]*self.threads))
         finally:
             os.chdir(olddir)
             if job_id is not None:
                 try_cancel(job_id)
             if jobdir is not None:
                 shutil.rmtree(jobdir)
-        return res
+        return [(st, r) for st, rs in res for r in rs]
 
 def f(a):
     raise ValueError("bad balue: {}".format(a))
