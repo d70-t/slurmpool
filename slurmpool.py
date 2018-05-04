@@ -23,6 +23,14 @@ RUN_TEMPLATE = """
 import os
 import sys
 import cloudpickle as marshal
+import signal
+
+class TerminateException(Exception):
+    pass
+def terminate_handler(signum, frame):
+    raise TerminateException()
+signal.signal(signal.SIGTERM, terminate_handler)
+
 
 olddir = os.getcwd()
 controldir = os.path.join(olddir, sys.argv[1])
