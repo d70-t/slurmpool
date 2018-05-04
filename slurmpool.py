@@ -116,8 +116,11 @@ def chunks(l, n):
     return (l[i:i+n] for i in xrange(0, len(l), n))
 
 class SlurmPool(object):
-    def __init__(self, workdir, threads=2, config=None):
-        self.workdir = workdir
+    def __init__(self, workdir=None, threads=2, config=None):
+        if workdir is None:
+            self.workdir = os.path.join(os.environ["SCRATCH"], "slurmpool")
+        else:
+            self.workdir = workdir
         if config is None:
             self.config = {}
         else:
@@ -235,7 +238,7 @@ def _main():
         "ntasks": "1",
         "requeue": None,
     }
-    p = SlurmPool("/project/meteo/work/Tobias.Koelling/slurmpool", config)
+    p = SlurmPool(config=config)
     print p.map(g, range(40))
 
 if __name__ == '__main__':
