@@ -23,6 +23,7 @@ RUN_TEMPLATE = """
 import os
 import sys
 import cloudpickle as marshal
+import traceback
 import signal
 
 class TerminateException(Exception):
@@ -51,7 +52,7 @@ try:
 except Exception as e:
     os.chdir(controldir)
     with open("error.marshal", "w") as errfile:
-        marshal.dump(e, errfile)
+        marshal.dump({"exception": e, "traceback": traceback.format_exc()}, errfile)
     raise
 """
 
@@ -185,8 +186,12 @@ class SlurmPool(object):
                 resfn = os.path.join(subdir, "res.marshal")
                 errfn = os.path.join(subdir, "error.marshal")
                 if os.path.exists(errfn):
+                    print "ERROR in JOB {}!".format(i)
                     with open(errfn) as errfile:
-                        raise marshal.load(errfile)
+                        error_info = marshal.load(errfile)
+                    print error_info["traceback"]
+                    print "="*30
+                    raise error_info["exception"]
                 if os.path.exists(resfn):
                     with open(resfn) as resfile:
                         res.append(("ok", marshal.load(resfile)))
