@@ -131,7 +131,7 @@ class SlurmPool(object):
     def map(self, f, *iterables):
         inputs = zip(*iterables)
         retries = 3
-        res = self._map(f, inputs, retries)
+        res = self._map(f, inputs)
         while retries > 0:
             retries -= 1
             retry_tasks = [
@@ -141,12 +141,12 @@ class SlurmPool(object):
             if len(retry_tasks) == 0:
                 break
             idx, inputs2 = zip(*retry_tasks)
-            res2 = self._map(f, inputs2, retries)
+            res2 = self._map(f, inputs2)
             for i, r in zip(idx, res2):
                 res[i] = r
         return [r if c == "ok" else None for c, r in res]
 
-    def _map(self, f, inputs, retries):
+    def _map(self, f, inputs):
         sourcemodule = inspect.getmodule(f).__name__
         sourcefile = os.path.abspath(inspect.getfile(f))
         sourcefolder = os.path.dirname(sourcefile)
@@ -168,7 +168,7 @@ class SlurmPool(object):
         try:
             jobdir = tempfile.mkdtemp(prefix=prefix)
             os.chdir(jobdir)
-            run_script = RUN_TEMPLATE.format()
+            run_script = RUN_TEMPLATE
             with open(os.path.join(jobdir, "f.marshal"), "w") as ffile:
                 marshal.dump(f, ffile)
             with open(os.path.join(jobdir, "run.py"), "w") as runfile:
