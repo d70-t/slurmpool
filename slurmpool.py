@@ -116,7 +116,7 @@ def chunks(l, n):
     return (l[i:i+n] for i in xrange(0, len(l), n))
 
 class SlurmPool(object):
-    def __init__(self, workdir=None, threads=2, config=None):
+    def __init__(self, workdir=None, threads=1, config=None):
         if workdir is None:
             self.workdir = os.path.join(os.environ["SCRATCH"], "slurmpool")
         else:
